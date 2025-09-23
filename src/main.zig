@@ -95,6 +95,8 @@ const Field = struct {
         var wins = try Field.init(gpa, width, height);
 
         for (0..width*height) |idx| {
+            std.debug.print("{d} cells remaining\n", .{width*height-idx});
+
             var field = try Field.init(gpa, width, height);
             defer field.deinit(gpa);
 
