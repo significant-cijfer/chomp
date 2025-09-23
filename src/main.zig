@@ -4,6 +4,36 @@ const cwd = std.fs.cwd;
 const indexOfScalarPos = std.mem.indexOfScalarPos;
 const Allocator = std.mem.Allocator;
 
+const Memo = struct {
+    wins: std.AutoHashMap(u64, bool),
+
+    pub fn init(gpa: Allocator) Memo {
+        return .{
+            .wins = .init(gpa),
+        };
+    }
+
+    pub fn deinit(self: *Memo) void {
+        self.wins.deinit();
+    }
+
+    fn hash(_: *Memo, key: []bool) u64 {
+        var hasher = std.hash.Wyhash.init(0);
+        std.hash.autoHashStrat(&hasher, key, .Deep);
+        return hasher.final();
+    }
+
+    fn remember(self: *Memo, field: Field, win: bool) !void {
+        const h = self.hash(field.cells);
+        try self.wins.put(h, win);
+    }
+
+    fn recall(self: *Memo, field: Field) ?bool {
+        const h = self.hash(field.cells);
+        return self.wins.get(h);
+    }
+};
+
 const Field = struct {
     wdt: u32,
     hgt: u32,
@@ -61,12 +91,7 @@ const Field = struct {
         return indexOfScalarPos(bool, self.cells, start, false);
     }
 
-    //Stappeplan,
-    //  ga over alle varianten
-    //  voor elke, zet elke mogelijke zet in
-    //      voor elke, herhaal
-    //  hou bij hoevaak elke zet gezet word, en wie won
-    pub fn analyze(gpa: Allocator, width: u32, height: u32) !Field {
+    pub fn analyze(gpa: Allocator, memo: *Memo, width: u32, height: u32) !Field {
         var wins = try Field.init(gpa, width, height);
 
         for (0..width*height) |idx| {
@@ -75,17 +100,18 @@ const Field = struct {
 
             field.eatIdx(idx);
 
-            const win = try field.guaranteedWin(gpa, false);
+            const win = try field.guaranteedWin(gpa, memo, false);
             wins.cells[idx] = !win;
         }
 
         return wins;
     }
 
-    fn guaranteedWin(self: *Field, gpa: Allocator, p1: bool) !bool {
+    fn guaranteedWin(self: *Field, gpa: Allocator, memo: *Memo, p1: bool) !bool {
         var start: u64 = 0;
 
         if (self.nextMove(0) == null) return true;
+        if (memo.recall(self.*)) |w| return w;
 
         while (self.nextMove(start)) |pos| : (start = pos+1) {
             var field = try self.clone(gpa);
@@ -93,78 +119,12 @@ const Field = struct {
 
             field.eatIdx(pos);
 
-            const w = try field.guaranteedWin(gpa, !p1);
+            const w = try field.guaranteedWin(gpa, memo, !p1);
+            try memo.remember(field, w);
             if (!w) return true;
         }
 
         return false;
-    }
-};
-
-const Scoreboard = struct {
-    wdt: u32,
-    hgt: u32,
-    scores1: []u64,
-    scores2: []u64,
-
-    pub fn init(gpa: Allocator, width: u32, height: u32) !Scoreboard {
-        const scores1 = try gpa.alloc(u64, width*height);
-        const scores2 = try gpa.alloc(u64, width*height);
-        @memset(scores1, 0);
-        @memset(scores2, 0);
-
-        return .{
-            .wdt = width,
-            .hgt = height,
-            .scores1 = scores1,
-            .scores2 = scores2,
-        };
-    }
-
-    pub fn deinit(self: Scoreboard, gpa: Allocator) void {
-        gpa.free(self.scores1);
-        gpa.free(self.scores2);
-    }
-
-    pub fn print(self: Scoreboard) void {
-        std.debug.print("Board: {}x{}:\n", .{self.wdt, self.hgt});
-        for (self.scores1, self.scores2, 0..) |score1, score2, idx|
-            std.debug.print("x: {}, y: {} => p1: {}, p2: {}\n", .{idx % self.wdt, idx / self.wdt, score1, score2});
-    }
-
-    pub fn colorize(self: Scoreboard) !void {
-        const max1: f128 = @floatFromInt(std.mem.max(u64, self.scores1));
-        const max2: f128 = @floatFromInt(std.mem.max(u64, self.scores2));
-        const max = @max(max1, max2);
-        var buffer: [1024]u8 = undefined;
-
-        const file = try cwd().createFile("out.ppm", .{});
-        defer file.close();
-
-        var writer = file.writer(&buffer); //kut buffer
-        const fout = &writer.interface;
-
-        try fout.print("P3 {d} {d} 255\n", .{self.wdt, self.hgt});
-        for (self.scores1, self.scores2) |score1, score2| {
-            const s1: f128 = @floatFromInt(score1);
-            const s2: f128 = @floatFromInt(score2);
-            const b1: u8 = @intFromFloat(s1/max*255);
-            const b2: u8 = @intFromFloat(s2/max*255);
-            try fout.print("{d} 0 {d} ", .{b1, b2});
-        }
-
-        try fout.flush();
-    }
-
-    fn addMove(self: *Scoreboard, x: u32, y: u32, p1: bool) void {
-        if (p1)
-            self.scores1[x+y*self.wdt] += 1
-        else
-            self.scores2[x+y*self.wdt] += 1;
-    }
-
-    fn addMoveIdx(self: *Scoreboard, idx: u64, p1: bool) void {
-        self.addMove(@intCast(idx % self.wdt), @intCast(idx / self.wdt), p1);
     }
 };
 
@@ -193,9 +153,9 @@ pub fn main() !void {
         else => return err,
     };
 
-    var field = try Field.init(gpa, width, height);
-    defer field.deinit(gpa);
+    var memo = Memo.init(gpa);
+    defer memo.deinit();
 
-    const wins = try Field.analyze(gpa, width, height);
+    const wins = try Field.analyze(gpa, &memo, width, height);
     wins.print();
 }
