@@ -6,6 +6,6 @@ This program tries to find the wining starting point, maybe in the future ill tr
 Example usage:
 ```sh
 # Width x Height
-# Please do use the relase flag, optimizations havent been implemented yet lol
+# Please do use the release flag, optimizations have been implemented, but sizes larger than 10x10, will still take a long time to compute
 zig build run --release=safe -- 4 4
 ```
