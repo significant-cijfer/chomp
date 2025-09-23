@@ -168,12 +168,30 @@ const Scoreboard = struct {
     }
 };
 
+fn parseArgs(gpa: Allocator) ![2]u32 {
+    var args = try std.process.argsWithAllocator(gpa);
+    defer args.deinit();
+
+    std.debug.assert(args.skip());
+    const width = args.next() orelse return error.ArgsExhaustion;
+    const height = args.next() orelse return error.ArgsExhaustion;
+
+    return [2]u32{
+        try std.fmt.parseInt(u32, width, 0),
+        try std.fmt.parseInt(u32, height, 0),
+    };
+}
+
 pub fn main() !void {
     var dbg = std.heap.DebugAllocator(.{}).init;
     const gpa = dbg.allocator();
 
-    const width = 10;
-    const height = 3;
+    const width, const height = parseArgs(gpa) catch |err| switch (err) {
+        error.ArgsExhaustion => @panic("Expected at least 2 arguments"),
+        error.InvalidCharacter,
+        error.Overflow => @panic("First two arguments must be parsable by std.fmt.parseInt(u32, buf, 0)"),
+        else => return err,
+    };
 
     var field = try Field.init(gpa, width, height);
     defer field.deinit(gpa);
