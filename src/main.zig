@@ -42,13 +42,6 @@ const Field = struct {
         };
     }
 
-    // max range of a u32 * u32 is u64
-    // have to think abt this range again lol TvT
-    // 2^(2^64) ermmmm
-    fn variants(self: Field) u64 {
-        return std.math.pow(u64, 2, self.wdt*self.hgt);
-    }
-
     fn eat(self: Field, x: u32, y: u32) void {
         // oob check
         if (x >= self.wdt or y >= self.hgt) @panic("TODO, figure out how tf this happened");
@@ -73,28 +66,38 @@ const Field = struct {
     //  voor elke, zet elke mogelijke zet in
     //      voor elke, herhaal
     //  hou bij hoevaak elke zet gezet word, en wie won
-    pub fn analyze(gpa: Allocator, width: u32, height: u32) !Scoreboard {
-        var field = try Field.init(gpa, width, height);
-        var board = try Scoreboard.init(gpa, width, height);
-        defer field.deinit(gpa);
+    pub fn analyze(gpa: Allocator, width: u32, height: u32) !Field {
+        var wins = try Field.init(gpa, width, height);
 
-        try field.analyzeMoves(&board, gpa, true);
-        return board;
+        for (0..width*height) |idx| {
+            var field = try Field.init(gpa, width, height);
+            defer field.deinit(gpa);
+
+            field.eatIdx(idx);
+
+            const win = try field.guaranteedWin(gpa, false);
+            wins.cells[idx] = !win;
+        }
+
+        return wins;
     }
 
-    fn analyzeMoves(self: *Field, board: *Scoreboard, gpa: Allocator, p1: bool) !void {
+    fn guaranteedWin(self: *Field, gpa: Allocator, p1: bool) !bool {
         var start: u64 = 0;
+
+        if (self.nextMove(0) == null) return true;
 
         while (self.nextMove(start)) |pos| : (start = pos+1) {
             var field = try self.clone(gpa);
             defer field.deinit(gpa);
 
-            board.addMoveIdx(pos, p1);
             field.eatIdx(pos);
-            //field.print();
 
-            try field.analyzeMoves(board, gpa, !p1);
+            const w = try field.guaranteedWin(gpa, !p1);
+            if (!w) return true;
         }
+
+        return false;
     }
 };
 
@@ -169,19 +172,12 @@ pub fn main() !void {
     var dbg = std.heap.DebugAllocator(.{}).init;
     const gpa = dbg.allocator();
 
-    const width = 4;
-    const height = 4;
+    const width = 10;
+    const height = 3;
 
     var field = try Field.init(gpa, width, height);
     defer field.deinit(gpa);
 
-    field.print();
-    std.debug.print("Field info:\n", .{});
-    std.debug.print("Field.variants: {}\n", .{field.variants()});
-
-    const board = try Field.analyze(gpa, width, height);
-    defer board.deinit(gpa);
-
-    board.print();
-    try board.colorize();
+    const wins = try Field.analyze(gpa, width, height);
+    wins.print();
 }
