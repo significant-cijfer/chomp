@@ -7,5 +7,5 @@ Example usage:
 ```sh
 # Width x Height
 # Please do use the relase flag, optimizations havent been implemented yet lol
-zig build run --release=safe -- 10 4
+zig build run --release=safe -- 4 4
 ```
