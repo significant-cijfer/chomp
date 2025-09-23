@@ -78,22 +78,22 @@ const Field = struct {
         var board = try Scoreboard.init(gpa, width, height);
         defer field.deinit(gpa);
 
-        try field.analyzeMoves(&board, gpa);
+        try field.analyzeMoves(&board, gpa, true);
         return board;
     }
 
-    fn analyzeMoves(self: *Field, board: *Scoreboard, gpa: Allocator) !void {
+    fn analyzeMoves(self: *Field, board: *Scoreboard, gpa: Allocator, p1: bool) !void {
         var start: u64 = 0;
 
         while (self.nextMove(start)) |pos| : (start = pos+1) {
             var field = try self.clone(gpa);
             defer field.deinit(gpa);
 
-            board.addMoveIdx(pos);
+            board.addMoveIdx(pos, p1);
             field.eatIdx(pos);
             //field.print();
 
-            try field.analyzeMoves(board, gpa);
+            try field.analyzeMoves(board, gpa, !p1);
         }
     }
 };
@@ -101,31 +101,38 @@ const Field = struct {
 const Scoreboard = struct {
     wdt: u32,
     hgt: u32,
-    scores: []u64,
+    scores1: []u64,
+    scores2: []u64,
 
     pub fn init(gpa: Allocator, width: u32, height: u32) !Scoreboard {
-        const scores = try gpa.alloc(u64, width*height);
-        @memset(scores, 0);
+        const scores1 = try gpa.alloc(u64, width*height);
+        const scores2 = try gpa.alloc(u64, width*height);
+        @memset(scores1, 0);
+        @memset(scores2, 0);
 
         return .{
             .wdt = width,
             .hgt = height,
-            .scores = scores,
+            .scores1 = scores1,
+            .scores2 = scores2,
         };
     }
 
     pub fn deinit(self: Scoreboard, gpa: Allocator) void {
-        gpa.free(self.scores);
+        gpa.free(self.scores1);
+        gpa.free(self.scores2);
     }
 
     pub fn print(self: Scoreboard) void {
         std.debug.print("Board: {}x{}:\n", .{self.wdt, self.hgt});
-        for (self.scores, 0..) |score, idx|
-            std.debug.print("x: {}, y: {} => {}\n", .{idx % self.wdt, idx / self.wdt, score});
+        for (self.scores1, self.scores2, 0..) |score1, score2, idx|
+            std.debug.print("x: {}, y: {} => p1: {}, p2: {}\n", .{idx % self.wdt, idx / self.wdt, score1, score2});
     }
 
     pub fn colorize(self: Scoreboard) !void {
-        const max: f128 = @floatFromInt(std.mem.max(u64, self.scores));
+        const max1: f128 = @floatFromInt(std.mem.max(u64, self.scores1));
+        const max2: f128 = @floatFromInt(std.mem.max(u64, self.scores2));
+        const max = @max(max1, max2);
         var buffer: [1024]u8 = undefined;
 
         const file = try cwd().createFile("out.ppm", .{});
@@ -134,22 +141,27 @@ const Scoreboard = struct {
         var writer = file.writer(&buffer); //kut buffer
         const fout = &writer.interface;
 
-        try fout.print("P2 {d} {d} 255\n", .{self.wdt, self.hgt});
-        for (self.scores) |score| {
-            const s: f128 = @floatFromInt(score);
-            const b: u8 = @intFromFloat(s/max*255);
-            try fout.print("{d} ", .{b});
+        try fout.print("P3 {d} {d} 255\n", .{self.wdt, self.hgt});
+        for (self.scores1, self.scores2) |score1, score2| {
+            const s1: f128 = @floatFromInt(score1);
+            const s2: f128 = @floatFromInt(score2);
+            const b1: u8 = @intFromFloat(s1/max*255);
+            const b2: u8 = @intFromFloat(s2/max*255);
+            try fout.print("{d} 0 {d} ", .{b1, b2});
         }
 
         try fout.flush();
     }
 
-    fn addMove(self: *Scoreboard, x: u32, y: u32) void {
-        self.scores[x+y*self.wdt] += 1;
+    fn addMove(self: *Scoreboard, x: u32, y: u32, p1: bool) void {
+        if (p1)
+            self.scores1[x+y*self.wdt] += 1
+        else
+            self.scores2[x+y*self.wdt] += 1;
     }
 
-    fn addMoveIdx(self: *Scoreboard, idx: u64) void {
-        self.addMove(@intCast(idx % self.wdt), @intCast(idx / self.wdt));
+    fn addMoveIdx(self: *Scoreboard, idx: u64, p1: bool) void {
+        self.addMove(@intCast(idx % self.wdt), @intCast(idx / self.wdt), p1);
     }
 };
 
